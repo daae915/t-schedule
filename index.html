@@ -334,7 +334,13 @@ button,input,select,textarea{font-family:'Noto Sans KR',sans-serif;}
               <option value="반">1반, 2반, 3반 …</option>
               <option value="학년반">1-1, 1-2, 1-3 …</option>
               <option value="반영문">A반, B반, C반 …</option>
+              <option value="직접입력">교사가 직접 입력</option>
             </select>
+          </div>
+          <div class="field full">
+            <label>반 이름 직접 입력</label>
+            <textarea id="cfg-custom-class-names" placeholder="예) 3반, 5반, 7반 또는 줄바꿈으로 한 줄에 하나씩 입력" oninput="handleCustomClassNamesInput(this.value)"></textarea>
+            <div class="helper">선택과목처럼 반 번호가 연속이 아니면 쉼표 또는 줄바꿈으로 직접 입력하세요. 직접 입력 형식에서는 입력한 반 이름 개수에 맞춰 반 개수도 자동 반영됩니다. 최대 20개까지 지원합니다.</div>
           </div>
           <div class="field full">
             <label>반 이름 미리보기</label>
@@ -496,9 +502,26 @@ function normalizeTeacherSchedule(raw){
   });
   return base;
 }
-function buildClassNames(count, format){
+function parseCustomClassNames(text=''){
+  return String(text || '')
+    .split(/\r?\n|,/)
+    .map(item=>item.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+function buildClassNames(count, format, customText=''){
   const alpha = 'ABCDEFGHIJKLMNOPQRST';
-  return Array.from({length:count}, (_,i)=>{
+  const safeCount = Math.max(1, Math.min(20, parseInt(count) || 1));
+  if(format==='직접입력'){
+    const customNames = parseCustomClassNames(customText);
+    if(customNames.length >= safeCount) return customNames.slice(0, safeCount);
+    if(customNames.length){
+      const filled = [...customNames];
+      while(filled.length < safeCount) filled.push(`선택${filled.length + 1}`);
+      return filled;
+    }
+  }
+  return Array.from({length:safeCount}, (_,i)=>{
     if(format==='학년반') return '1-' + (i+1);
     if(format==='반영문') return alpha[i] + '반';
     return (i+1) + '반';
@@ -512,6 +535,7 @@ function makeSubject(overrides={}){
     schoolYear: overrides.schoolYear || '',
     classCount,
     classFormat: overrides.classFormat || '반',
+    customClassNames: typeof overrides.customClassNames === 'string' ? overrides.customClassNames : '',
     selectedClassIdx: overrides.selectedClassIdx || 0,
     units: overrides.units || ['고대 국가의 형성','삼국의 성립과 발전','남북국 시대'],
     classData: overrides.classData || Array.from({length:classCount}, makeClassData)
@@ -521,6 +545,11 @@ function normalizeSubject(subject){
   const normalized = {...makeSubject(), ...subject};
   normalized.classCount = Math.max(1, Math.min(20, parseInt(normalized.classCount) || 6));
   normalized.classFormat = normalized.classFormat || '반';
+  normalized.customClassNames = typeof normalized.customClassNames === 'string' ? normalized.customClassNames : '';
+  if(normalized.classFormat === '직접입력'){
+    const customNames = parseCustomClassNames(normalized.customClassNames);
+    if(customNames.length) normalized.classCount = customNames.length;
+  }
   normalized.units = Array.isArray(normalized.units) ? normalized.units : [];
   normalized.classData = Array.isArray(normalized.classData) ? normalized.classData.map(d=>({...makeClassData(), ...d})) : [];
   while(normalized.classData.length < normalized.classCount) normalized.classData.push(makeClassData());
@@ -634,7 +663,7 @@ function renderSubjectNav(){
 }
 function renderProgressTab(){
   const subject = getCurrentSubject();
-  const classNames = buildClassNames(subject.classCount, subject.classFormat);
+  const classNames = buildClassNames(subject.classCount, subject.classFormat, subject.customClassNames);
   const max = subject.units.length;
   const total = subject.classData.reduce((sum, d)=>sum + (max>0 ? Math.round(((parseInt(d.unit)||0)/max)*100) : 0), 0);
   const done = subject.classData.filter(d=>d.status).length;
@@ -746,7 +775,9 @@ function renderSettingsTab(){
   document.getElementById('cfg-school-year').value = subject.schoolYear || '';
   document.getElementById('cfg-class-count').value = subject.classCount;
   document.getElementById('cfg-class-format').value = subject.classFormat;
-  const preview = buildClassNames(Math.min(subject.classCount, 5), subject.classFormat).join(', ');
+  const customNamesInput = document.getElementById('cfg-custom-class-names');
+  if(customNamesInput) customNamesInput.value = subject.customClassNames || '';
+  const preview = buildClassNames(Math.min(subject.classCount, 5), subject.classFormat, subject.customClassNames).join(', ');
   document.getElementById('class-preview').value = preview + (subject.classCount > 5 ? ', …' : '');
   document.getElementById('subject-order-preview').value = `${order} / ${state.subjects.length}`;
 }
@@ -801,7 +832,7 @@ function renderCalendar(){
     const dayMarks = Array.from(markData.types);
     const tooltipLines = [...markData.titles];
     if(isSelectedClassDate){
-      const classNames = buildClassNames(currentSubject.classCount, currentSubject.classFormat);
+      const classNames = buildClassNames(currentSubject.classCount, currentSubject.classFormat, currentSubject.customClassNames);
       tooltipLines.unshift(`${currentSubject.title} ${classNames[currentSubject.selectedClassIdx]} 수업 날짜`);
     }
     const tooltip = tooltipLines.length ? ` title="${escapeAttr(tooltipLines.join('\n'))}"` : '';
@@ -1366,7 +1397,7 @@ function setCurrentClassDateFromCalendar(isoDate){
   if(dateInput) dateInput.value = isoDate;
   renderCalendar();
   scheduleAutosave();
-  const classNames = buildClassNames(subject.classCount, subject.classFormat);
+  const classNames = buildClassNames(subject.classCount, subject.classFormat, subject.customClassNames);
   showToast(`${classNames[subject.selectedClassIdx]} 수업 날짜를 ${isoDate}로 맞췄어요`);
 }
 function syncCardInputs(){
@@ -1426,13 +1457,37 @@ function handleSubjectTextInput(field, value){
 }
 function handleStructureInput(){
   const subject = getCurrentSubject();
-  subject.classCount = Math.max(1, Math.min(20, parseInt(document.getElementById('cfg-class-count').value) || 1));
   subject.classFormat = document.getElementById('cfg-class-format').value;
+  const customInput = document.getElementById('cfg-custom-class-names');
+  if(customInput) subject.customClassNames = customInput.value;
+  if(subject.classFormat === '직접입력'){
+    const customNames = parseCustomClassNames(subject.customClassNames);
+    if(customNames.length) subject.classCount = customNames.length;
+    else subject.classCount = Math.max(1, Math.min(20, parseInt(document.getElementById('cfg-class-count').value) || subject.classCount || 1));
+  }else{
+    subject.classCount = Math.max(1, Math.min(20, parseInt(document.getElementById('cfg-class-count').value) || 1));
+  }
   while(subject.classData.length < subject.classCount) subject.classData.push(makeClassData());
   if(subject.classData.length > subject.classCount) subject.classData = subject.classData.slice(0, subject.classCount);
   if(subject.selectedClassIdx >= subject.classCount) subject.selectedClassIdx = subject.classCount - 1;
   renderProgressTab();
   renderSettingsTab();
+  renderSubjectNav();
+  scheduleAutosave();
+}
+function handleCustomClassNamesInput(value){
+  const subject = getCurrentSubject();
+  subject.customClassNames = value;
+  if(subject.classFormat === '직접입력'){
+    const customNames = parseCustomClassNames(value);
+    if(customNames.length) subject.classCount = customNames.length;
+    while(subject.classData.length < subject.classCount) subject.classData.push(makeClassData());
+    if(subject.classData.length > subject.classCount) subject.classData = subject.classData.slice(0, subject.classCount);
+    if(subject.selectedClassIdx >= subject.classCount) subject.selectedClassIdx = subject.classCount - 1;
+  }
+  renderProgressTab();
+  renderSettingsTab();
+  renderSubjectNav();
   scheduleAutosave();
 }
 function openSubjectModal(){
@@ -1468,7 +1523,7 @@ function deleteCurrentSubject(){
 function copySummary(){
   syncCardInputs();
   const subject = getCurrentSubject();
-  const classNames = buildClassNames(subject.classCount, subject.classFormat);
+  const classNames = buildClassNames(subject.classCount, subject.classFormat, subject.customClassNames);
   const max = subject.units.length;
   const statusLabel = key => STATUS_OPTIONS.find(s=>s.key===key)?.label || '미설정';
   const title = subject.schoolYear ? `${subject.schoolYear} ${subject.title}` : subject.title;
