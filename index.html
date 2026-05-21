@@ -103,6 +103,10 @@ button,input,select,textarea{font-family:'Noto Sans KR',sans-serif;}
 .timetable-cell input{width:100%;height:100%;border:none;background:#ffffff;padding:6px 8px;text-align:center;font-size:14px;font-weight:500;color:#353b48;outline:none;}
 .timetable-cell input::placeholder{color:#8992a5;}
 .timetable-cell input:focus{background:#f7faff;box-shadow:inset 0 0 0 1px var(--accent-mid);}
+.timetable-cell-view{display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:6px 8px;text-align:center;font-size:14px;font-weight:500;color:#353b48;line-height:1.35;white-space:pre-wrap;word-break:keep-all;}
+.timetable-cell-view.empty{color:#c4cad6;}
+.shared-grid-wrap{margin-top:10px;}
+.shared-grid-helper{margin:10px 0 12px;line-height:1.6;}
 .academic-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px;}
 .academic-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;}
 .academic-title{font-size:15px;font-weight:700;}
@@ -222,7 +226,7 @@ button,input,select,textarea{font-family:'Noto Sans KR',sans-serif;}
       <button class="tab-btn active" id="tab-progress" onclick="switchTab('progress')">📊 반별 진도</button>
       <button class="tab-btn" id="tab-units" onclick="switchTab('units')">☰ 단원 목록</button>
       <button class="tab-btn" id="tab-settings" onclick="switchTab('settings')">⚙ 과목 설정</button>
-      <button class="tab-btn" id="tab-shared" onclick="switchTab('shared')">🛠 공통 설정</button>
+      <button class="tab-btn" id="tab-shared" onclick="switchTab('shared')">🛠 설정</button>
     </div>
 
     <section class="tab-content active" id="content-progress">
@@ -357,7 +361,7 @@ button,input,select,textarea{font-family:'Noto Sans KR',sans-serif;}
     <section class="tab-content" id="content-shared">
       <div class="tab-shell">
       <div class="page-header">
-        <h1>공통 설정</h1>
+        <h1>설정</h1>
         <p>학사일정과 교사 시간표처럼 과목을 바꿔도 공통으로 유지되는 항목을 관리합니다.</p>
       </div>
       <div class="academic-card">
@@ -375,9 +379,27 @@ button,input,select,textarea{font-family:'Noto Sans KR',sans-serif;}
         <div class="academic-status" id="academic-status">아직 업로드된 공통 학사일정이 없습니다.</div>
         <div class="academic-list" id="academic-list"></div>
       </div>
+      <div class="timetable-card">
+        <div class="academic-top">
+          <div>
+            <div class="academic-title">공통 교사 시간표</div>
+            <div class="academic-subtitle">시간표를 파일로 업로드하거나 아래 표에 직접 입력할 수 있습니다. 저장되면 진도표 오른쪽 시간표에 즉시 반영됩니다.</div>
+          </div>
+        </div>
+        <div class="academic-actions">
+          <button class="btn" onclick="openTimetableUpload()">📂 시간표 업로드</button>
+          <button class="btn danger" onclick="clearTeacherSchedule()">🗑 시간표 비우기</button>
+        </div>
+        <input type="file" id="timetable-file-input" accept=".csv,.xlsx,.xls,.json" style="display:none" onchange="handleTimetableFile(event)">
+        <div class="academic-status" id="timetable-status">아직 입력된 공통 교사 시간표가 없습니다.</div>
+        <div class="helper shared-grid-helper">직접 입력 예시: 월 / 1교시 칸에 <strong>1-2</strong>, <strong>2-4</strong>, <strong>공강</strong>처럼 입력하면 됩니다. 업로드 파일은 <strong>월·화·수·목·금</strong> 열과 <strong>1~7교시</strong> 행이 있는 표 형식을 권장합니다.</div>
+        <div class="timetable-wrap shared-grid-wrap">
+          <div id="teacher-timetable-grid-settings"></div>
+        </div>
+      </div>
       <div class="section-card">
         <h3>공통 적용 안내</h3>
-        <p class="helper">오른쪽 교사 시간표와 달력은 과목을 바꿔도 그대로 유지됩니다. 달력에는 모든 과목의 수업일과 다음 수업 예정, 그리고 공통 학사일정이 함께 표시됩니다.</p>
+        <p class="helper">오른쪽 교사 시간표와 달력은 과목을 바꿔도 그대로 유지됩니다. 이 설정 탭에서 수정한 시간표와 학사일정이 진도표 화면에 즉시 반영됩니다.</p>
       </div>
       </div>
     </section>
@@ -689,17 +711,33 @@ function renderUnitsTab(){
   `).join('') : '<div class="empty-note">아직 단원이 없습니다. 단원 추가 버튼으로 시작하세요.</div>';
 }
 function renderTeacherSchedule(){
-  const grid = document.getElementById('teacher-timetable-grid');
-  if(!grid) return;
   const schedule = normalizeTeacherSchedule(state.sharedTeacherSchedule);
-  let html = '<table class="timetable-table"><thead><tr><th class="timetable-corner"></th>' + TIMETABLE_DAYS.map(day=>`<th class="timetable-head">${day.label}</th>`).join('') + '</tr></thead><tbody>';
-  for(let period=0; period<TIMETABLE_PERIODS; period++){
-    html += `<tr><td class="timetable-period">${period + 1}</td>`;
-    html += TIMETABLE_DAYS.map(day=>`<td class="timetable-cell"><input type="text" value="${escapeAttr(schedule[day.key][period] || '')}" placeholder="" oninput="handleTeacherScheduleInput('${day.key}', ${period}, this.value)"></td>`).join('');
-    html += '</tr>';
+  state.sharedTeacherSchedule = schedule;
+  const renderGrid = (gridId, editable) => {
+    const grid = document.getElementById(gridId);
+    if(!grid) return;
+    let html = '<table class="timetable-table"><thead><tr><th class="timetable-corner"></th>' + TIMETABLE_DAYS.map(day=>`<th class="timetable-head">${day.label}</th>`).join('') + '</tr></thead><tbody>';
+    for(let period=0; period<TIMETABLE_PERIODS; period++){
+      html += `<tr><td class="timetable-period">${period + 1}</td>`;
+      html += TIMETABLE_DAYS.map(day=>{
+        const value = schedule[day.key][period] || '';
+        if(editable){
+          return `<td class="timetable-cell"><input type="text" value="${escapeAttr(value)}" placeholder="" oninput="handleTeacherScheduleInput('${day.key}', ${period}, this.value)"></td>`;
+        }
+        return `<td class="timetable-cell"><div class="timetable-cell-view${value ? '' : ' empty'}">${value ? escapeHtml(value) : '&nbsp;'}</div></td>`;
+      }).join('');
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    grid.innerHTML = html;
+  };
+  renderGrid('teacher-timetable-grid', false);
+  renderGrid('teacher-timetable-grid-settings', true);
+  const statusEl = document.getElementById('timetable-status');
+  if(statusEl){
+    const filled = countTeacherScheduleEntries(schedule);
+    statusEl.textContent = filled ? `공통 교사 시간표 ${filled}칸이 저장되어 있습니다. 아래 표에서 직접 수정하거나 파일로 한 번에 불러올 수 있어요.` : '아직 입력된 공통 교사 시간표가 없습니다. 아래 표에 직접 입력하거나 시간표 파일을 업로드해 주세요.';
   }
-  html += '</tbody></table>';
-  grid.innerHTML = html;
 }
 function renderSettingsTab(){
   const subject = getCurrentSubject();
@@ -807,7 +845,10 @@ function switchTab(tab, keep=false){
     if(tab==='progress') renderProgressTab();
     if(tab==='units') renderUnitsTab();
     if(tab==='settings') renderSettingsTab();
-    if(tab==='shared') renderAcademicSchedule();
+    if(tab==='shared'){
+      renderAcademicSchedule();
+      renderTeacherSchedule();
+    }
   }
 }
 function getCurrentSubjectIndex(){
@@ -979,6 +1020,168 @@ function parseCalendarCellInfo(value){
   const title = raw.slice(match.index + match[1].length).replace(/^[\s.,/·-]+/, '').trim();
   return {day, title: title.replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ').trim()};
 }
+
+const TIMETABLE_DAY_ALIASES = {
+  mon:['mon','monday','월','월요일'],
+  tue:['tue','tues','tuesday','화','화요일'],
+  wed:['wed','wednesday','수','수요일'],
+  thu:['thu','thur','thurs','thursday','목','목요일'],
+  fri:['fri','friday','금','금요일']
+};
+function normalizeDayKey(value){
+  const text = String(value || '').replace(/\s+/g, '').toLowerCase();
+  if(!text) return '';
+  for(const [key, aliases] of Object.entries(TIMETABLE_DAY_ALIASES)){
+    if(aliases.some(alias=>text===alias || text.includes(alias))) return key;
+  }
+  return '';
+}
+function parsePeriodIndex(value){
+  const text = String(value || '').trim();
+  if(!text) return -1;
+  const match = text.match(/([1-7])/);
+  if(!match) return -1;
+  const period = parseInt(match[1], 10);
+  return period >= 1 && period <= TIMETABLE_PERIODS ? period - 1 : -1;
+}
+function countTeacherScheduleEntries(schedule){
+  const normalized = normalizeTeacherSchedule(schedule);
+  return TIMETABLE_DAYS.reduce((sum, day)=>sum + normalized[day.key].filter(value=>String(value || '').trim()).length, 0);
+}
+function extractTimetableFromObjectRows(rows){
+  const schedule = makeTeacherSchedule();
+  let filled = 0;
+  rows.forEach(row=>{
+    if(!row || typeof row !== 'object') return;
+    const periodIndex = parsePeriodIndex(findRowValue(row, ['교시','period','time']));
+    if(periodIndex < 0) return;
+    TIMETABLE_DAYS.forEach(day=>{
+      const value = findRowValue(row, TIMETABLE_DAY_ALIASES[day.key]);
+      const text = String(value || '').trim();
+      if(!text) return;
+      schedule[day.key][periodIndex] = text;
+      filled += 1;
+    });
+  });
+  return filled ? schedule : null;
+}
+function extractTimetableFromArrayRows(rows){
+  let bestSchedule = null;
+  let bestCount = 0;
+  rows.forEach((row, rowIndex)=>{
+    const cells = Array.isArray(row) ? row.map(cell=>String(cell ?? '').trim()) : [];
+    if(!cells.some(Boolean)) return;
+    const dayIndexMap = {};
+    cells.forEach((cell, idx)=>{
+      const dayKey = normalizeDayKey(cell);
+      if(dayKey && dayIndexMap[dayKey] == null) dayIndexMap[dayKey] = idx;
+    });
+    if(Object.keys(dayIndexMap).length < 3) return;
+    const candidate = makeTeacherSchedule();
+    let count = 0;
+    for(let r=rowIndex + 1; r<Math.min(rows.length, rowIndex + 20); r++){
+      const line = Array.isArray(rows[r]) ? rows[r].map(cell=>String(cell ?? '').trim()) : [];
+      if(!line.some(Boolean)) continue;
+      const periodIndex = parsePeriodIndex(line[0]) >= 0 ? parsePeriodIndex(line[0]) : parsePeriodIndex(line.find(Boolean));
+      if(periodIndex < 0) continue;
+      Object.entries(dayIndexMap).forEach(([dayKey, colIdx])=>{
+        const value = String(line[colIdx] || '').trim();
+        if(!value || normalizeDayKey(value)) return;
+        candidate[dayKey][periodIndex] = value;
+        count += 1;
+      });
+    }
+    if(count > bestCount){
+      bestSchedule = candidate;
+      bestCount = count;
+    }
+  });
+  const rowWise = makeTeacherSchedule();
+  let rowWiseCount = 0;
+  rows.forEach(row=>{
+    const cells = Array.isArray(row) ? row.map(cell=>String(cell ?? '').trim()) : [];
+    if(!cells.some(Boolean)) return;
+    const dayKey = normalizeDayKey(cells[0]);
+    if(!dayKey) return;
+    for(let i=1; i<cells.length && i<=TIMETABLE_PERIODS; i++){
+      const value = String(cells[i] || '').trim();
+      if(!value || parsePeriodIndex(value) >= 0) continue;
+      rowWise[dayKey][i - 1] = value;
+      rowWiseCount += 1;
+    }
+  });
+  if(rowWiseCount > bestCount){
+    bestSchedule = rowWise;
+    bestCount = rowWiseCount;
+  }
+  return bestCount ? bestSchedule : null;
+}
+function parseTimetableJson(data){
+  const schedule = makeTeacherSchedule();
+  let filled = 0;
+  if(Array.isArray(data)){
+    data.forEach(item=>{
+      const dayKey = normalizeDayKey(item?.day || item?.요일 || item?.weekday || '');
+      const periodIndex = parsePeriodIndex(item?.period || item?.교시 || item?.time || '');
+      const value = String(item?.value || item?.내용 || item?.class || item?.text || '').trim();
+      if(!dayKey || periodIndex < 0 || !value) return;
+      schedule[dayKey][periodIndex] = value;
+      filled += 1;
+    });
+    return filled ? schedule : null;
+  }
+  if(data && typeof data === 'object'){
+    TIMETABLE_DAYS.forEach(day=>{
+      const raw = data[day.key] ?? data[day.label] ?? data[day.label + '요일'];
+      if(Array.isArray(raw)){
+        raw.slice(0, TIMETABLE_PERIODS).forEach((value, idx)=>{
+          const text = String(value || '').trim();
+          if(!text) return;
+          schedule[day.key][idx] = text;
+          filled += 1;
+        });
+      }
+    });
+    if(filled) return schedule;
+    if(Array.isArray(data.rows)) return parseTimetableJson(data.rows);
+    if(Array.isArray(data.entries)) return parseTimetableJson(data.entries);
+  }
+  return null;
+}
+async function parseTimetableFile(file){
+  const name = String(file?.name || '').toLowerCase();
+  if(name.endsWith('.json')){
+    const json = JSON.parse(await file.text());
+    const parsed = parseTimetableJson(json);
+    return normalizeTeacherSchedule(parsed || makeTeacherSchedule());
+  }
+  if((name.endsWith('.csv') || name.endsWith('.txt')) && typeof XLSX === 'undefined'){
+    const text = await file.text();
+    const rows = text.split(/\r?\n/).map(line=>line.split(',').map(v=>v.trim()));
+    const parsed = extractTimetableFromArrayRows(rows);
+    return normalizeTeacherSchedule(parsed || makeTeacherSchedule());
+  }
+  if(typeof XLSX === 'undefined') throw new Error('xlsx library unavailable');
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, {type:'array', cellDates:true});
+  let parsedSchedule = null;
+  let parsedCount = 0;
+  workbook.SheetNames.forEach(sheetName=>{
+    const sheet = workbook.Sheets[sheetName];
+    const objRows = XLSX.utils.sheet_to_json(sheet, {defval:'', raw:true});
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', raw:true});
+    const objectSchedule = objRows.length ? extractTimetableFromObjectRows(objRows) : null;
+    const arraySchedule = rows.length ? extractTimetableFromArrayRows(rows) : null;
+    [objectSchedule, arraySchedule].forEach(candidate=>{
+      const count = candidate ? countTeacherScheduleEntries(candidate) : 0;
+      if(count > parsedCount){
+        parsedSchedule = candidate;
+        parsedCount = count;
+      }
+    });
+  });
+  return normalizeTeacherSchedule(parsedSchedule || makeTeacherSchedule());
+}
 function inferSequentialDate(prevDate, day, monthHint, baseYear){
   if(!prevDate){
     if(monthHint){
@@ -1101,6 +1304,46 @@ function clearAcademicEvents(){
   renderCalendar();
   renderAcademicSchedule();
   persistState('공통 학사일정을 삭제했어요');
+}
+function openTimetableUpload(){
+  document.getElementById('timetable-file-input')?.click();
+}
+async function handleTimetableFile(event){
+  const file = event?.target?.files?.[0];
+  if(!file) return;
+  const statusEl = document.getElementById('timetable-status');
+  if(statusEl) statusEl.textContent = `${file.name} 파일을 읽는 중입니다...`;
+  try{
+    const schedule = await parseTimetableFile(file);
+    const filled = countTeacherScheduleEntries(schedule);
+    if(!filled){
+      if(statusEl) statusEl.textContent = '파일을 읽었지만 인식된 시간표가 없습니다. 월~금 열과 1~7교시 행을 확인해 주세요.';
+      showToast('읽을 수 있는 시간표가 없어요');
+      event.target.value = '';
+      return;
+    }
+    state.sharedTeacherSchedule = normalizeTeacherSchedule(schedule);
+    renderTeacherSchedule();
+    scheduleAutosave();
+    showToast(`공통 교사 시간표 ${filled}칸을 불러왔어요`);
+  }catch(error){
+    console.error(error);
+    if(statusEl) statusEl.textContent = '시간표 파일을 읽지 못했습니다. xlsx/csv 형식과 요일·교시 표를 확인해 주세요.';
+    showToast('시간표 파일을 읽지 못했어요');
+  }finally{
+    event.target.value = '';
+  }
+}
+function clearTeacherSchedule(){
+  const filled = countTeacherScheduleEntries(state.sharedTeacherSchedule);
+  if(!filled){
+    showToast('삭제할 시간표가 없어요');
+    return;
+  }
+  if(!confirm('공통 교사 시간표를 모두 비울까요?')) return;
+  state.sharedTeacherSchedule = makeTeacherSchedule();
+  renderTeacherSchedule();
+  persistState('공통 교사 시간표를 비웠어요');
 }
 function switchSubject(subjectId){
   syncCardInputs();
@@ -1263,6 +1506,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   renderAll();
 });
 </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
